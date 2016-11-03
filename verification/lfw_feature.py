@@ -11,6 +11,8 @@ import numpy as np
 from sklearn.cross_validation import KFold
 from sklearn.metrics import accuracy_score
 
+import scipy.io as sio
+
 from lightened_cnn import lightened_cnn_b_feature
 import time
 
@@ -114,6 +116,60 @@ def get_predict_file(args):
     print("count of images: %d" % count_pair * 2)
     print("Predict time: %f s" % (end - start))
 
+def load_image_list(list_file_path):
+    f = open(list_file_path, 'r')
+    image_list = []
+    labels = []
+    for line in f:
+        items = line.split()
+        image_list.append(items[0].strip())
+        # labels.append(items[1].strip())
+        # image_list.append(line)
+    f.close()
+    return image_list, labels
+
+def read1img(name, size, ctx):
+    pair_arr = np.zeros((1, 1, size, size), dtype=float)
+    print name
+    img1 = np.expand_dims(cv2.imread(name, 0), axis=0)
+    pair_arr[0][:] = img1/255.0
+    return pair_arr
+
+def string_list_to_cells(lst):
+    """
+    Uses numpy.ndarray with dtype=object. When save to mat file using scipy.io.savemat, it will be a cell array.
+    """
+    cells = np.ndarray(len(lst), dtype = 'object')
+    for i in range(len(lst)):
+        cells[i] = lst[i]
+    return cells
+
+def get_features(args):
+    name_list = load_image_list(args.image_list)[0]
+    _, model_args, model_auxs = mx.model.load_checkpoint(args.model_prefix, args.epoch)
+    symbol = lightened_cnn_b_feature()
+    count_img = 0
+    features_shape = (len(name_list), 256)
+    features = np.empty(features_shape, dtype='float32', order='C')
+    start = time.clock()
+    for image in name_list:
+        model_args['data'] = mx.nd.array(read1img(image, args.size, ctx), ctx)
+        exector = symbol.bind(ctx, model_args ,args_grad=None, grad_req="null", aux_states=model_auxs)
+        exector.forward(is_train=False)
+        exector.outputs[0].wait_to_read()
+        output = exector.outputs[0].asnumpy()
+        end = time.clock()
+        features[count_img, :] = output[0].copy()
+        count_img += 1
+        print("count of images: %d" % count_img)
+    print("Predict time: %f s" % (end - start))
+
+    # Save to mat
+    features = np.asarray(features, dtype='float32')
+    dic = {'features': features,
+           'image_path': string_list_to_cells(name_list)}
+    sio.savemat(args.mat_file+'.mat', dic)
+
 def print_result(args):
     accuracy, threshold = acc(args.predict_file)
     logging.info("10-fold accuracy is:\n{}\n".format(accuracy))
@@ -137,23 +193,28 @@ def main():
                         help='The epoch number of model')
     parser.add_argument('--predict-file', type=str, default='./predict.txt',
                         help='The file which contains similarity distance of every pair image given in pairs.txt')
+    parser.add_argument('--image-list', type=str,
+                        help='Face path list file')
+    parser.add_argument('--mat-file', type=str,  default='result',
+                        help='Result mat file name')
     args = parser.parse_args()
     logging.info(args)
-    if not os.path.isfile(args.pairs):
-        logging.info("Error: LFW pairs (--lfwPairs) file not found.")
-        logging.info("Download from http://vis-www.cs.umass.edu/lfw/pairs.txt.")
-        logging.info("Default location:", "./pairs.txt")
-        sys.exit(-1)
-    print("Loading embeddings done")
-    if not os.path.exists(args.lfw_align):
-        logging.info("Error: lfw dataset not aligned.")
-        logging.info("Please use ./utils/align_face.py to align lfw firstly")
-        sys.exit(-1)
-    if not os.path.isfile(args.predict_file):
-        logging.info("begin generate the predict.txt.")
-        get_predict_file(args)
-        logging.info("predict.txt has benn generated")
-    print_result(args)
+    # if not os.path.isfile(args.pairs):
+        # logging.info("Error: LFW pairs (--lfwPairs) file not found.")
+        # logging.info("Download from http://vis-www.cs.umass.edu/lfw/pairs.txt.")
+        # logging.info("Default location:", "./pairs.txt")
+        # sys.exit(-1)
+    # print("Loading embeddings done")
+    # if not os.path.exists(args.lfw_align):
+        # logging.info("Error: lfw dataset not aligned.")
+        # logging.info("Please use ./utils/align_face.py to align lfw firstly")
+        # sys.exit(-1)
+    # if not os.path.isfile(args.predict_file):
+        # logging.info("begin generate the predict.txt.")
+        # get_predict_file(args)
+        # logging.info("predict.txt has benn generated")
+    # print_result(args)
+    get_features(args)
 
 if __name__ == '__main__':
     main()

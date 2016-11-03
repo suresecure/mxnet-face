@@ -60,6 +60,7 @@ def lightened_cnn_b(num_classes=10575):
 def main():
     # lightened_cnn = lightened_cnn_a()
     lightened_cnn = lightened_cnn_b()
+    lightened_cnn.save('aaaaa.symbol')
     devs = mx.cpu() if args.gpus is None else [mx.gpu(int(i)) for i in args.gpus.split(',')]
     epoch_size = args.num_examples / args.batch_size
     checkpoint = mx.callback.do_checkpoint(args.model_save_prefix)
